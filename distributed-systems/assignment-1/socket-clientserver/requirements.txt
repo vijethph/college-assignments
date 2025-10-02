@@ -1,0 +1,13 @@
+# Core FastAPI and WebSocket dependencies
+fastapi[all]==0.117.1
+uvicorn[standard]==0.36.0
+websockets==15.0.1
+
+# Additional useful packages
+python-multipart==0.0.20
+pydantic==2.11.9
+pydantic-settings==2.10.1
+
+# Development and testing
+pytest==8.3.3
+pytest-asyncio==0.24.0

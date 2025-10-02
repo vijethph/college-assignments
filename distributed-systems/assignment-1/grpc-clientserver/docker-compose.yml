@@ -1,0 +1,10 @@
+version: "3.8"
+
+services:
+  grpc-server:
+    build: .
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./users.db:/app/users.db
+    restart: unless-stopped
