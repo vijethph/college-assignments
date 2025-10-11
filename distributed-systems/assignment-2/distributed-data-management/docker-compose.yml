@@ -1,0 +1,92 @@
+services:
+  mongo1:
+    image: mongo:8
+    container_name: mongo1
+    hostname: mongo1
+    command: bash /mongo-init.sh
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo1_data:/data/db
+      - shared_keyfile:/data/keyfile
+      - ./mongo-init.sh:/mongo-init.sh:ro
+    networks:
+      - mongo-cluster
+    healthcheck:
+      test: mongosh --port 27017 --eval "db.adminCommand('ping')" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  mongo2:
+    image: mongo:8
+    container_name: mongo2
+    hostname: mongo2
+    command: >
+      bash -c "
+      while [ ! -f /data/keyfile/mongodb-keyfile ]; do sleep 1; done &&
+      chmod 400 /data/keyfile/mongodb-keyfile &&
+      chown mongodb:mongodb /data/keyfile/mongodb-keyfile &&
+      exec mongod --replSet rs0 --keyFile /data/keyfile/mongodb-keyfile --bind_ip_all --port 27017
+      "
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo2_data:/data/db
+      - shared_keyfile:/data/keyfile
+    networks:
+      - mongo-cluster
+    depends_on:
+      mongo1:
+        condition: service_healthy
+
+  mongo3:
+    image: mongo:8
+    container_name: mongo3
+    hostname: mongo3
+    command: >
+      bash -c "
+      while [ ! -f /data/keyfile/mongodb-keyfile ]; do sleep 1; done &&
+      chmod 400 /data/keyfile/mongodb-keyfile &&
+      chown mongodb:mongodb /data/keyfile/mongodb-keyfile &&
+      exec mongod --replSet rs0 --keyFile /data/keyfile/mongodb-keyfile --bind_ip_all --port 27017
+      "
+    ports:
+      - "27019:27017"
+    volumes:
+      - mongo3_data:/data/db
+      - shared_keyfile:/data/keyfile
+    networks:
+      - mongo-cluster
+    depends_on:
+      mongo1:
+        condition: service_healthy
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mongodb-app
+    environment:
+      - MONGODB_URI=mongodb://admin:admin123@mongo1:27017,mongo2:27017,mongo3:27017/?replicaSet=rs0&authSource=admin
+    networks:
+      - mongo-cluster
+    depends_on:
+      mongo1:
+        condition: service_healthy
+      mongo2:
+        condition: service_started
+      mongo3:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  mongo1_data:
+  mongo2_data:
+  mongo3_data:
+  shared_keyfile:
+
+networks:
+  mongo-cluster:
+    driver: bridge
