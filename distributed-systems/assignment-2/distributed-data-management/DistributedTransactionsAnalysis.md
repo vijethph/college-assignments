@@ -10,7 +10,7 @@ Consider a typical e-commerce order placement involving three microservices:
 2. **PaymentService**: Processes payment transactions
 3. **InventoryService**: Manages stock levels and reservations
 
-![E-commerce Workflow](/mermaid1.png "E-commerce Workflow")
+![E-commerce Workflow](./mermaid1.png "E-commerce Workflow")
 
 ### Order Placement Workflow
 
@@ -38,7 +38,7 @@ def place_order_acid(order_data):
         return order_id
 ```
 
-![ACID Transactions](/mermaid2.png "ACID Transactions")
+![ACID Transactions](./mermaid2.png "ACID Transactions")
 
 #### Problems in Distributed Systems
 
@@ -110,7 +110,7 @@ class OrderOrchestrator:
 - **Tight Coupling**: Services depend on central coordinator
 - **Complexity**: Coordinator must understand all service interactions
 
-![Orchestrated Saga](/mermaid3.png "Orchestrated Saga")
+![Orchestrated Saga](./mermaid3.png "Orchestrated Saga")
 
 #### B. Choreographed Saga
 
@@ -157,7 +157,7 @@ class PaymentService:
             ))
 ```
 
-![Choreographed Saga](/mermaid4.png "Choreographed Saga")
+![Choreographed Saga](./mermaid4.png "Choreographed Saga")
 
 **Advantages:**
 
@@ -203,7 +203,7 @@ class PaymentService:
 
 ## When to Use Each Approach
 
-![Approach Workflow](/mermaid5.png "Approach Workflow")
+![Approach Workflow](./mermaid5.png "Approach Workflow")
 
 ### ACID Transactions
 
