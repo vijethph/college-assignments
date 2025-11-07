@@ -1,0 +1,93 @@
+{
+  "version": "1.0.0",
+  "title": "Backend Service Pod Deletion - Resilience Test",
+  "description": "Simulate backend service failure by scaling pods to 0, observe circuit breaker opening and recovery",
+  "tags": ["kubernetes", "resilience", "circuit-breaker"],
+  "steady-state-hypothesis": {
+    "title": "System is healthy and processing requests",
+    "probes": [
+      {
+        "type": "probe",
+        "name": "client-service-is-available",
+        "tolerance": true,
+        "provider": {
+          "type": "python",
+          "module": "chaosk8s.pod.probes",
+          "func": "pods_in_phase",
+          "arguments": {
+            "label_selector": "app=client-service",
+            "phase": "Running",
+            "ns": "default"
+          }
+        }
+      },
+      {
+        "type": "probe",
+        "name": "backend-service-is-available",
+        "tolerance": true,
+        "provider": {
+          "type": "python",
+          "module": "chaosk8s.pod.probes",
+          "func": "pods_in_phase",
+          "arguments": {
+            "label_selector": "app=backend-service",
+            "phase": "Running",
+            "ns": "default"
+          }
+        }
+      }
+    ]
+  },
+  "method": [
+    {
+      "type": "action",
+      "name": "scale-backend-to-zero",
+      "provider": {
+        "type": "python",
+        "module": "chaosk8s.deployment.actions",
+        "func": "scale_deployment",
+        "arguments": {
+          "name": "backend-service",
+          "replicas": 0,
+          "ns": "default"
+        }
+      },
+      "pauses": {
+        "after": 40
+      }
+    },
+    {
+      "type": "action",
+      "name": "scale-backend-to-one",
+      "provider": {
+        "type": "python",
+        "module": "chaosk8s.deployment.actions",
+        "func": "scale_deployment",
+        "arguments": {
+          "name": "backend-service",
+          "replicas": 1,
+          "ns": "default"
+        }
+      },
+      "pauses": {
+        "after": 10
+      }
+    }
+  ],
+  "rollbacks": [
+    {
+      "type": "action",
+      "name": "restore-backend-service",
+      "provider": {
+        "type": "python",
+        "module": "chaosk8s.deployment.actions",
+        "func": "scale_deployment",
+        "arguments": {
+          "name": "backend-service",
+          "replicas": 1,
+          "ns": "default"
+        }
+      }
+    }
+  ]
+}
