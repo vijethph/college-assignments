@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: booking-service-config
+  namespace: hotel-booking
+data:
+  SERVICE_PORT: "8000"
+  DATABASE_URL: "sqlite:////app/data/booking_service.db"
+  HOTEL_SERVICE_URL: "http://hotel-service.hotel-booking.svc.cluster.local:8000"
+  USER_SERVICE_URL: "http://user-service.hotel-booking.svc.cluster.local:8000"
+  LOG_LEVEL: "INFO"

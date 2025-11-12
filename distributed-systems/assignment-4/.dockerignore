@@ -1,0 +1,27 @@
+**/**pycache**
+**/_.pyc
+\*\*/_.pyo \*_/_.pyd
+.Python
+_.so
+_.db
+_.egg-info
+dist
+build
+.git
+.gitignore
+README.md
+_.md
+.vscode
+.idea
+_.log
+.env
+.venv
+venv/
+**pycache**/
+_.pytest_cache
+.coverage
+htmlcov/
+.mypy_cache
+.pytest_cache
+scripts/
+k8s/
