@@ -1,6 +1,29 @@
 version: "2.4"
 
 services:
+  message-broker:
+    image: rabbitmq:4.2-alpine
+    container_name: message-broker
+    command: |
+      bash -c '
+      rabbitmq-plugins enable rabbitmq_management &&
+      rabbitmq-server'
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    networks:
+      - microservices-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
   hotel-service:
     build:
       context: .
@@ -11,10 +34,14 @@ services:
     environment:
       - SERVICE_PORT=8000
       - LOG_LEVEL=INFO
+      - RABBITMQ_URL=amqp://guest:guest@message-broker:5672/
     volumes:
       - hotel-data:/app/services/hotel_service
     networks:
       - microservices-network
+    depends_on:
+      message-broker:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -33,10 +60,14 @@ services:
     environment:
       - SERVICE_PORT=8000
       - LOG_LEVEL=INFO
+      - RABBITMQ_URL=amqp://guest:guest@message-broker:5672/
     volumes:
       - user-data:/app/services/user_service
     networks:
       - microservices-network
+    depends_on:
+      message-broker:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -57,11 +88,14 @@ services:
       - HOTEL_SERVICE_URL=http://hotel-service:8000
       - USER_SERVICE_URL=http://user-service:8000
       - LOG_LEVEL=INFO
+      - RABBITMQ_URL=amqp://guest:guest@message-broker:5672/
     volumes:
       - booking-data:/app/services/booking_service
     networks:
       - microservices-network
     depends_on:
+      message-broker:
+        condition: service_healthy
       hotel-service:
         condition: service_healthy
       user-service:

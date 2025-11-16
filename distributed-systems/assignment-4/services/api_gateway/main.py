@@ -7,12 +7,34 @@ handles cross-cutting concerns like request routing and error handling.
 """
 
 import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import aiohttp
 import structlog
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+
+from shared.models import (
+    BookingCancellation,
+    BookingCreate,
+    BookingResponse,
+    HealthResponse,
+    HotelCreate,
+    HotelResponse,
+    RoomAvailabilityCheck,
+    RoomAvailabilityUpdate,
+    RoomCreate,
+    RoomResponse,
+    TokenResponse,
+    UserCreate,
+    UserLogin,
+    UserResponse,
+    UserUpdate,
+)
 
 logger = structlog.get_logger()
 
@@ -31,6 +53,11 @@ TIMEOUT = aiohttp.ClientTimeout(total=30.0)
 
 @app.on_event("startup")
 async def startup_event():
+    """
+    Application startup event handler.
+
+    Logs the service startup information including configured backend service URLs.
+    """
     logger.info(
         "api_gateway_started",
         port=os.getenv("SERVICE_PORT", "8000"),
@@ -40,22 +67,42 @@ async def startup_event():
     )
 
 
-@app.get("/health")
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    tags=["Health"],
+    summary="Health Check",
+    description="Check the health status of the API Gateway service",
+    responses={
+        200: {"description": "Service is healthy and operational"},
+    },
+)
 async def health():
     """
-    Check API Gateway health status.
+    Health check endpoint.
 
-    :return: Health status response
+    :return: Health status of the API gateway
     :rtype: dict
     """
     return {"status": "healthy", "service": "api-gateway"}
 
 
 # Hotel Service Routes
-@app.get("/api/hotels", tags=["Hotels"], summary="Get all hotels")
+@app.get(
+    "/api/hotels",
+    response_model=list[HotelResponse],
+    tags=["Hotels"],
+    summary="List Hotels",
+    description="Retrieve all hotels with optional filtering by location and rating. Proxies to the hotel service.",
+    responses={
+        200: {"description": "List of hotels retrieved successfully"},
+        503: {"description": "Hotel service unavailable"},
+        504: {"description": "Gateway timeout"},
+    },
+)
 async def get_hotels(request: Request):
     """
-    Get a list of all hotels.
+    Get all hotels.
 
     :param request: The incoming HTTP request
     :type request: Request
@@ -64,11 +111,26 @@ async def get_hotels(request: Request):
     return await proxy_request(request, HOTEL_SERVICE_URL, "/hotels")
 
 
-@app.post("/api/hotels", tags=["Hotels"], summary="Create a new hotel")
-async def create_hotel(request: Request):
+@app.post(
+    "/api/hotels",
+    response_model=HotelResponse,
+    status_code=201,
+    tags=["Hotels"],
+    summary="Create Hotel",
+    description="Create a new hotel in the system via the gateway. Proxies to the hotel service.",
+    responses={
+        201: {"description": "Hotel successfully created"},
+        400: {"description": "Invalid hotel data provided"},
+        503: {"description": "Hotel service unavailable"},
+        504: {"description": "Gateway timeout"},
+    },
+)
+async def create_hotel(hotel: HotelCreate, request: Request):
     """
     Create a new hotel.
 
+    :param hotel: Hotel data to create
+    :type hotel: HotelCreate
     :param request: The incoming HTTP request
     :type request: Request
     :return: Created hotel details from the hotel service
@@ -76,7 +138,19 @@ async def create_hotel(request: Request):
     return await proxy_request(request, HOTEL_SERVICE_URL, "/hotels")
 
 
-@app.get("/api/hotels/{hotel_id}", tags=["Hotels"], summary="Get hotel by ID")
+@app.get(
+    "/api/hotels/{hotel_id}",
+    response_model=HotelResponse,
+    tags=["Hotels"],
+    summary="Get Hotel",
+    description="Retrieve detailed information about a specific hotel by its ID via the gateway.",
+    responses={
+        200: {"description": "Hotel details retrieved successfully"},
+        404: {"description": "Hotel not found"},
+        503: {"description": "Hotel service unavailable"},
+        504: {"description": "Gateway timeout"},
+    },
+)
 async def get_hotel(request: Request, hotel_id: int):
     """
     Get details of a specific hotel.
@@ -121,13 +195,25 @@ async def delete_hotel(request: Request, hotel_id: int):
 # Hotel Room Routes
 @app.post(
     "/api/hotels/{hotel_id}/rooms",
-    tags=["Hotels"],
-    summary="Create a room in hotel",
+    response_model=RoomResponse,
+    status_code=201,
+    tags=["Rooms"],
+    summary="Create Room",
+    description="Add a new room to a specific hotel via the gateway. Proxies to the hotel service.",
+    responses={
+        201: {"description": "Room successfully created"},
+        400: {"description": "Invalid room data provided"},
+        404: {"description": "Hotel not found"},
+        503: {"description": "Hotel service unavailable"},
+        504: {"description": "Gateway timeout"},
+    },
 )
-async def create_room(request: Request, hotel_id: int):
+async def create_room(room: RoomCreate, request: Request, hotel_id: int):
     """
-    Create a new room in a hotel.
+    Create a new room for a hotel.
 
+    :param room: Room data to create
+    :type room: RoomCreate
     :param request: The incoming HTTP request
     :type request: Request
     :param hotel_id: The hotel identifier
@@ -139,8 +225,16 @@ async def create_room(request: Request, hotel_id: int):
 
 @app.get(
     "/api/hotels/{hotel_id}/rooms",
-    tags=["Hotels"],
-    summary="Get hotel rooms",
+    response_model=list[RoomResponse],
+    tags=["Rooms"],
+    summary="List Hotel Rooms",
+    description="Retrieve all rooms for a specific hotel with optional filtering by room type and availability.",
+    responses={
+        200: {"description": "List of rooms retrieved successfully"},
+        404: {"description": "Hotel not found"},
+        503: {"description": "Hotel service unavailable"},
+        504: {"description": "Gateway timeout"},
+    },
 )
 async def get_hotel_rooms(request: Request, hotel_id: int):
     """
@@ -157,18 +251,30 @@ async def get_hotel_rooms(request: Request, hotel_id: int):
 
 @app.post(
     "/api/hotels/{hotel_id}/rooms/check-availability",
-    tags=["Hotels"],
-    summary="Check room availability",
+    tags=["Rooms"],
+    summary="Check Room Availability",
+    description="Check if rooms of a specific type are available for given dates at a hotel.",
+    responses={
+        200: {"description": "Availability information retrieved successfully"},
+        400: {"description": "Invalid date range or room type"},
+        404: {"description": "Hotel not found"},
+        503: {"description": "Hotel service unavailable"},
+        504: {"description": "Gateway timeout"},
+    },
 )
-async def check_room_availability(request: Request, hotel_id: int):
+async def check_availability(
+    availability: RoomAvailabilityCheck, request: Request, hotel_id: int
+):
     """
-    Check available rooms for specified dates.
+    Check room availability.
 
+    :param availability: Availability check parameters
+    :type availability: RoomAvailabilityCheck
     :param request: The incoming HTTP request
     :type request: Request
     :param hotel_id: The hotel identifier
     :type hotel_id: int
-    :return: Available rooms for the specified dates from the hotel service
+    :return: Availability details from the hotel service
     """
     return await proxy_request(
         request, HOTEL_SERVICE_URL, f"/hotels/{hotel_id}/rooms/check-availability"
@@ -177,34 +283,62 @@ async def check_room_availability(request: Request, hotel_id: int):
 
 @app.put(
     "/api/hotels/{hotel_id}/rooms/{room_id}/availability",
-    tags=["Hotels"],
-    summary="Update room availability",
+    tags=["Rooms"],
+    summary="Update Room Availability",
+    description="Update the available count for a specific room (increase or decrease inventory).",
+    responses={
+        200: {"description": "Room availability updated successfully"},
+        400: {"description": "Invalid availability change"},
+        404: {"description": "Hotel or room not found"},
+        503: {"description": "Hotel service unavailable"},
+        504: {"description": "Gateway timeout"},
+    },
 )
-async def update_room_availability(request: Request, hotel_id: int, room_id: int):
+async def update_availability(
+    availability_update: RoomAvailabilityUpdate,
+    request: Request,
+    hotel_id: int,
+    room_id: int,
+):
     """
-    Update room availability count.
+    Update room availability.
 
+    :param availability_update: Availability update data
+    :type availability_update: RoomAvailabilityUpdate
     :param request: The incoming HTTP request
     :type request: Request
     :param hotel_id: The hotel identifier
     :type hotel_id: int
     :param room_id: The room identifier
     :type room_id: int
-    :return: Updated room availability from the hotel service
+    :return: Updated availability details from the hotel service
     """
     return await proxy_request(
-        request,
-        HOTEL_SERVICE_URL,
-        f"/hotels/{hotel_id}/rooms/{room_id}/availability",
+        request, HOTEL_SERVICE_URL, f"/hotels/{hotel_id}/rooms/{room_id}/availability"
     )
 
 
 # User Service Routes
-@app.post("/api/users/register", tags=["Users"], summary="Register a new user")
-async def register_user(request: Request):
+@app.post(
+    "/api/users/register",
+    response_model=UserResponse,
+    status_code=201,
+    tags=["Users"],
+    summary="Register User",
+    description="Register a new user account in the system via the gateway. Proxies to the user service.",
+    responses={
+        201: {"description": "User successfully registered"},
+        400: {"description": "Invalid user data or email already exists"},
+        503: {"description": "User service unavailable"},
+        504: {"description": "Gateway timeout"},
+    },
+)
+async def register_user(user: UserCreate, request: Request):
     """
-    Register a new user account.
+    Register a new user.
 
+    :param user: User registration data
+    :type user: UserCreate
     :param request: The incoming HTTP request
     :type request: Request
     :return: Created user details from the user service
@@ -212,19 +346,45 @@ async def register_user(request: Request):
     return await proxy_request(request, USER_SERVICE_URL, "/users/register")
 
 
-@app.post("/api/users/login", tags=["Users"], summary="Login user")
-async def login_user(request: Request):
+@app.post(
+    "/api/users/login",
+    response_model=TokenResponse,
+    tags=["Authentication"],
+    summary="User Login",
+    description="Authenticate a user with email and password, returning a JWT access token.",
+    responses={
+        200: {"description": "Login successful, JWT token returned"},
+        401: {"description": "Invalid credentials"},
+        503: {"description": "User service unavailable"},
+        504: {"description": "Gateway timeout"},
+    },
+)
+async def login_user(credentials: UserLogin, request: Request):
     """
-    Login and get access token.
+    Login user.
 
+    :param credentials: Login credentials
+    :type credentials: UserLogin
     :param request: The incoming HTTP request
     :type request: Request
-    :return: Access token and user information from the user service
+    :return: JWT token and user details from the user service
     """
     return await proxy_request(request, USER_SERVICE_URL, "/users/login")
 
 
-@app.get("/api/users/{user_id}", tags=["Users"], summary="Get user by ID")
+@app.get(
+    "/api/users/{user_id}",
+    response_model=UserResponse,
+    tags=["Users"],
+    summary="Get User",
+    description="Retrieve detailed information about a specific user by their ID.",
+    responses={
+        200: {"description": "User details retrieved successfully"},
+        404: {"description": "User not found"},
+        503: {"description": "User service unavailable"},
+        504: {"description": "Gateway timeout"},
+    },
+)
 async def get_user(request: Request, user_id: int):
     """
     Get details of a specific user.
@@ -238,11 +398,26 @@ async def get_user(request: Request, user_id: int):
     return await proxy_request(request, USER_SERVICE_URL, f"/users/{user_id}")
 
 
-@app.put("/api/users/{user_id}", tags=["Users"], summary="Update user")
-async def update_user(request: Request, user_id: int):
+@app.put(
+    "/api/users/{user_id}",
+    response_model=UserResponse,
+    tags=["Users"],
+    summary="Update User",
+    description="Update user profile information such as name and phone number.",
+    responses={
+        200: {"description": "User updated successfully"},
+        404: {"description": "User not found"},
+        400: {"description": "Invalid update data"},
+        503: {"description": "User service unavailable"},
+        504: {"description": "Gateway timeout"},
+    },
+)
+async def update_user(user_update: UserUpdate, request: Request, user_id: int):
     """
-    Update user information.
+    Update user details.
 
+    :param user_update: User update data
+    :type user_update: UserUpdate
     :param request: The incoming HTTP request
     :type request: Request
     :param user_id: The user identifier
@@ -252,7 +427,18 @@ async def update_user(request: Request, user_id: int):
     return await proxy_request(request, USER_SERVICE_URL, f"/users/{user_id}")
 
 
-@app.post("/api/users/verify-token", tags=["Users"], summary="Verify token")
+@app.post(
+    "/api/users/verify-token",
+    tags=["Authentication"],
+    summary="Verify JWT Token",
+    description="Validate a JWT access token and retrieve the associated user information.",
+    responses={
+        200: {"description": "Token is valid, user information returned"},
+        401: {"description": "Invalid or expired token"},
+        503: {"description": "User service unavailable"},
+        504: {"description": "Gateway timeout"},
+    },
+)
 async def verify_token(request: Request):
     """
     Verify JWT token.
@@ -265,11 +451,27 @@ async def verify_token(request: Request):
 
 
 # Booking Service Routes
-@app.post("/api/bookings", tags=["Bookings"], summary="Create a new booking")
-async def create_booking(request: Request):
+@app.post(
+    "/api/bookings",
+    response_model=BookingResponse,
+    status_code=201,
+    tags=["Bookings"],
+    summary="Create Booking",
+    description="Create a new hotel room booking for a user with specified check-in and check-out dates.",
+    responses={
+        201: {"description": "Booking successfully created"},
+        400: {"description": "Invalid booking data or dates"},
+        404: {"description": "User, hotel, or room not found"},
+        503: {"description": "Booking service unavailable"},
+        504: {"description": "Gateway timeout"},
+    },
+)
+async def create_booking(booking: BookingCreate, request: Request):
     """
     Create a new booking.
 
+    :param booking: Booking data to create
+    :type booking: BookingCreate
     :param request: The incoming HTTP request
     :type request: Request
     :return: Created booking details from the booking service
@@ -277,7 +479,19 @@ async def create_booking(request: Request):
     return await proxy_request(request, BOOKING_SERVICE_URL, "/bookings")
 
 
-@app.get("/api/bookings/{booking_id}", tags=["Bookings"], summary="Get booking by ID")
+@app.get(
+    "/api/bookings/{booking_id}",
+    response_model=BookingResponse,
+    tags=["Bookings"],
+    summary="Get Booking",
+    description="Retrieve detailed information about a specific booking by its ID.",
+    responses={
+        200: {"description": "Booking details retrieved successfully"},
+        404: {"description": "Booking not found"},
+        503: {"description": "Booking service unavailable"},
+        504: {"description": "Gateway timeout"},
+    },
+)
 async def get_booking(request: Request, booking_id: int):
     """
     Get details of a specific booking.
@@ -293,8 +507,16 @@ async def get_booking(request: Request, booking_id: int):
 
 @app.get(
     "/api/bookings/user/{user_id}",
+    response_model=list[BookingResponse],
     tags=["Bookings"],
-    summary="Get user bookings",
+    summary="Get User Bookings",
+    description="Retrieve all bookings made by a specific user, including active and cancelled bookings.",
+    responses={
+        200: {"description": "List of user bookings retrieved successfully"},
+        404: {"description": "User not found"},
+        503: {"description": "Booking service unavailable"},
+        504: {"description": "Gateway timeout"},
+    },
 )
 async def get_user_bookings(request: Request, user_id: int):
     """
@@ -313,13 +535,28 @@ async def get_user_bookings(request: Request, user_id: int):
 
 @app.put(
     "/api/bookings/{booking_id}/cancel",
+    response_model=BookingResponse,
     tags=["Bookings"],
-    summary="Cancel booking",
+    summary="Cancel Booking",
+    description="Cancel an existing booking and optionally provide a cancellation reason.",
+    responses={
+        200: {"description": "Booking cancelled successfully"},
+        400: {
+            "description": "Booking cannot be cancelled (already cancelled or checked in)"
+        },
+        404: {"description": "Booking not found"},
+        503: {"description": "Booking service unavailable"},
+        504: {"description": "Gateway timeout"},
+    },
 )
-async def cancel_booking(request: Request, booking_id: int):
+async def cancel_booking(
+    cancellation: BookingCancellation, request: Request, booking_id: int
+):
     """
     Cancel a booking.
 
+    :param cancellation: Cancellation data
+    :type cancellation: BookingCancellation
     :param request: The incoming HTTP request
     :type request: Request
     :param booking_id: The booking identifier

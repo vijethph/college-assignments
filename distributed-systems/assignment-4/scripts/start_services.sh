@@ -18,9 +18,9 @@ cleanup() {
     exit 0
 }
 
-trap cleanup SIGINT SIGTERM EXIT
-
 start_local_services() {
+    trap cleanup SIGINT SIGTERM EXIT
+
     echo "Starting services..."
 
     cd "$PROJECT_ROOT/services/hotel_service"
@@ -51,7 +51,7 @@ start_docker_services() {
     fi
 
     echo "Starting Docker services..."
-    docker-compose up --build
+    docker compose up --build
 }
 
 start_kubernetes_services() {
@@ -64,43 +64,28 @@ start_kubernetes_services() {
     fi
 
     echo "Deploying to Kubernetes (namespace: $NAMESPACE)"
-    kubectl create namespace "$NAMESPACE" 2>/dev/null || true
-    kubectl apply -f k8s/ -n "$NAMESPACE"
-
     echo ""
-    echo "Services deployed"
-}
 
-case "$MODE" in
-    local)
-        start_local_services
-        ;;
-    docker)
-        start_docker_services
-        ;;
-    kubernetes|k8s)
-        start_kubernetes_services "$@"
-        ;;
-    *)
-        echo "ERROR: Unknown mode '$MODE'"
-        echo "Usage: $0 [local|docker|kubernetes] [namespace]"
-        exit 1
-        ;;
-esac
-        ;;
-    *)
-        echo "Usage: $0 [local|docker|kubernetes] [namespace]"
-        exit 1
-        ;;
-esac
-    kubectl create namespace "$NAMESPACE" 2>/dev/null || true
+    docker build -t hotel-service:latest -f services/hotel_service/Dockerfile .
+    docker build -t user-service:latest -f services/user_service/Dockerfile .
+    docker build -t booking-service:latest -f services/booking_service/Dockerfile .
+    docker build -t api-gateway:latest -f services/api_gateway/Dockerfile .
 
-    echo -e "${YELLOW}Applying Kubernetes manifests...${NC}"
-    kubectl apply -f k8s/ -n "$NAMESPACE"
+    kubectl apply -f k8s/namespace.yaml
+    kubectl apply -f k8s/pvc.yaml
+    kubectl apply -f k8s/message-broker/pvc.yaml
+    kubectl apply -f k8s/message-broker/
+    kubectl wait --for=condition=available --timeout=300s deployment/message-broker -n "$NAMESPACE"
+    kubectl apply -f k8s/hotel-service/
+    kubectl apply -f k8s/user-service/
+    kubectl apply -f k8s/booking-service/
+    kubectl apply -f k8s/api-gateway/
+    kubectl wait --for=condition=available --timeout=300s deployment/hotel-service -n "$NAMESPACE"
+    kubectl wait --for=condition=available --timeout=300s deployment/user-service -n "$NAMESPACE"
+    kubectl wait --for=condition=available --timeout=300s deployment/booking-service -n "$NAMESPACE"
+    kubectl wait --for=condition=available --timeout=300s deployment/api-gateway -n "$NAMESPACE"
 
-    echo ""
-    echo -e "${GREEN}Kubernetes resources applied!${NC}"
-
+    echo "All services deployed successfully!"
 }
 
 case "$MODE" in

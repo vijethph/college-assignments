@@ -44,7 +44,7 @@ curl -s -X POST "$BASE_URL/api/hotels" \
         "location": "Dublin",
         "rating": 4.5,
         "description": "Luxury hotel in the heart of Dublin",
-        "amenities": "WiFi, Pool, Gym, Restaurant, Bar, Spa"
+        "amenities": ["WiFi", "Pool", "Gym", "Restaurant", "Bar", "Spa"]
     }' > /dev/null
 
 curl -s -X POST "$BASE_URL/api/hotels" \
@@ -54,7 +54,7 @@ curl -s -X POST "$BASE_URL/api/hotels" \
         "location": "Galway",
         "rating": 4.8,
         "description": "Beautiful resort by the Atlantic Ocean",
-        "amenities": "WiFi, Beach Access, Pool, Restaurant, Water Sports"
+        "amenities": ["WiFi", "Beach Access", "Pool", "Restaurant", "Water Sports"]
     }' > /dev/null
 
 curl -s -X POST "$BASE_URL/api/hotels" \
@@ -64,7 +64,7 @@ curl -s -X POST "$BASE_URL/api/hotels" \
         "location": "Killarney",
         "rating": 4.2,
         "description": "Cozy lodge in the Kerry mountains",
-        "amenities": "WiFi, Fireplace, Hiking Trails, Restaurant"
+        "amenities": ["WiFi", "Fireplace", "Hiking Trails", "Restaurant"]
     }' > /dev/null
 
 echo "[PASS] Created 3 hotels"

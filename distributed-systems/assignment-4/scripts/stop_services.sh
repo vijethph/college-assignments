@@ -22,7 +22,8 @@ stop_docker_services() {
     fi
 
     echo "Stopping Docker services..."
-    docker-compose down
+    docker compose down
+    docker rmi api-gateway:latest user-service:latest hotel-service:latest booking-service:latest 2>/dev/null || true
     echo "Services stopped"
 }
 
@@ -49,25 +50,18 @@ case "$MODE" in
         stop_docker_services
         ;;
     kubernetes|k8s)
-        stop_kubernetes_services
+        stop_kubernetes_services "$@"
         ;;
-    *)
-        echo "Usage: $0 [local|docker|kubernetes] [namespace]"
-        exit 1
-        ;;
-
     all)
-        echo -e "${YELLOW}Stopping all services...${NC}"
+        echo "Stopping all services..."
         echo ""
         stop_local_services
         echo ""
-        if [ -f "$PROJECT_ROOT/docker-compose.yml" ]; then
+        if [ -f "docker-compose.yml" ]; then
             stop_docker_services
         fi
         ;;
-
     *)
-        echo -e "${RED}Error: Unknown mode '$MODE'${NC}"
         echo "Usage: $0 [local|docker|kubernetes|all] [namespace]"
         exit 1
         ;;

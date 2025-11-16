@@ -18,6 +18,15 @@ kubectl apply -f k8s/namespace.yaml
 
 echo "Creating PersistentVolumeClaims..."
 kubectl apply -f k8s/pvc.yaml
+kubectl apply -f k8s/message-broker/pvc.yaml
+
+echo ""
+echo "Deploying Message Broker..."
+kubectl apply -f k8s/message-broker/
+
+echo ""
+echo "Waiting for Message Broker to be ready..."
+kubectl wait --for=condition=available --timeout=300s deployment/message-broker -n hotel-booking
 
 echo ""
 echo "Deploying services..."

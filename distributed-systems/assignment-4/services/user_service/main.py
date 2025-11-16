@@ -21,7 +21,8 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from config import Config
 from database import User, get_db, init_db
-from models import (
+from shared.logging_config import configure_logging, get_logger
+from shared.models import (
     HealthResponse,
     TokenResponse,
     UserCreate,
@@ -29,7 +30,7 @@ from models import (
     UserResponse,
     UserUpdate,
 )
-from shared.logging_config import configure_logging, get_logger
+from shared.messaging import broker
 
 
 configure_logging(Config.SERVICE_NAME)
@@ -41,15 +42,42 @@ USER_NOT_FOUND = "User not found"
 INVALID_CREDENTIALS = "Invalid credentials"
 
 
+async def handle_booking_created(event: dict):
+    """
+    Handle booking created event.
+
+    :param event: Event payload containing booking details
+    :type event: dict
+    """
+    logger.info(
+        "booking_notification_received",
+        user_id=event["user_id"],
+        booking_id=event["booking_id"],
+        hotel_id=event["hotel_id"],
+    )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     logger.info("service_starting", port=Config.SERVICE_PORT)
     init_db()
+    await broker.connect()
+    await broker.subscribe(
+        queue_name="user_service_bookings",
+        routing_key="booking.created",
+        callback=handle_booking_created,
+    )
     yield
+    await broker.close()
     logger.info("service_stopping")
 
 
-app = FastAPI(title="User Service", lifespan=lifespan)
+app = FastAPI(
+    title="User Service",
+    description="User authentication and management service for hotel booking system",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
 
 def hash_password(password: str) -> str:
@@ -126,13 +154,29 @@ def verify_token(token: str) -> int:
         ) from e
 
 
-@app.get("/health", response_model=HealthResponse)
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    summary="Health Check",
+    description="Check if the user service is running and healthy",
+    tags=["Health"],
+)
 async def health_check():
     return HealthResponse(status="healthy", service=Config.SERVICE_NAME)
 
 
 @app.post(
-    "/users/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED
+    "/users/register",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Register User",
+    description="Create a new user account with email and password",
+    tags=["Users"],
+    responses={
+        201: {"description": "User registered successfully"},
+        400: {"description": "Email already registered"},
+        500: {"description": "Internal server error"},
+    },
 )
 async def register_user(user: UserCreate, db: Session = Depends(get_db)):
     try:
@@ -167,7 +211,18 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
         ) from e
 
 
-@app.post("/users/login", response_model=TokenResponse)
+@app.post(
+    "/users/login",
+    response_model=TokenResponse,
+    summary="User Login",
+    description="Authenticate user and receive JWT access token",
+    tags=["Authentication"],
+    responses={
+        200: {"description": "Login successful, JWT token returned"},
+        401: {"description": "Invalid credentials"},
+        500: {"description": "Internal server error"},
+    },
+)
 async def login_user(credentials: UserLogin, db: Session = Depends(get_db)):
     try:
         user = db.query(User).filter(User.email == credentials.email).first()
@@ -194,7 +249,17 @@ async def login_user(credentials: UserLogin, db: Session = Depends(get_db)):
         ) from e
 
 
-@app.get("/users/{user_id}", response_model=UserResponse)
+@app.get(
+    "/users/{user_id}",
+    response_model=UserResponse,
+    summary="Get User",
+    description="Retrieve user details by user ID",
+    tags=["Users"],
+    responses={
+        200: {"description": "User details retrieved successfully"},
+        404: {"description": "User not found"},
+    },
+)
 async def get_user(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -204,7 +269,18 @@ async def get_user(user_id: int, db: Session = Depends(get_db)):
     return user
 
 
-@app.put("/users/{user_id}", response_model=UserResponse)
+@app.put(
+    "/users/{user_id}",
+    response_model=UserResponse,
+    summary="Update User",
+    description="Update user profile information (name and phone)",
+    tags=["Users"],
+    responses={
+        200: {"description": "User updated successfully"},
+        404: {"description": "User not found"},
+        500: {"description": "Internal server error"},
+    },
+)
 async def update_user(
     user_id: int, user_update: UserUpdate, db: Session = Depends(get_db)
 ):
@@ -236,7 +312,16 @@ async def update_user(
         ) from e
 
 
-@app.post("/users/verify-token")
+@app.post(
+    "/users/verify-token",
+    summary="Verify JWT Token",
+    description="Validate a JWT token and extract user ID",
+    tags=["Authentication"],
+    responses={
+        200: {"description": "Token is valid"},
+        401: {"description": "Token is invalid or expired"},
+    },
+)
 async def verify_user_token(token: str):
     user_id = verify_token(token)
     return {"user_id": user_id, "valid": True}

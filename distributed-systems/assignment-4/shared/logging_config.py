@@ -31,5 +31,6 @@ def get_logger():
     Get a structured logger instance.
 
     :return: Logger instance
+    :rtype: structlog.BoundLogger
     """
     return structlog.get_logger()

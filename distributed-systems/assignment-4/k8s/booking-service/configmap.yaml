@@ -9,3 +9,4 @@ data:
   HOTEL_SERVICE_URL: "http://hotel-service.hotel-booking.svc.cluster.local:8000"
   USER_SERVICE_URL: "http://user-service.hotel-booking.svc.cluster.local:8000"
   LOG_LEVEL: "INFO"
+  RABBITMQ_URL: "amqp://guest:guest@message-broker-service.hotel-booking.svc.cluster.local:5672/"

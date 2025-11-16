@@ -7,3 +7,4 @@ data:
   SERVICE_PORT: "8000"
   DATABASE_URL: "sqlite:////app/data/hotel_service.db"
   LOG_LEVEL: "INFO"
+  RABBITMQ_URL: "amqp://guest:guest@message-broker-service.hotel-booking.svc.cluster.local:5672/"

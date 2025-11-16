@@ -21,8 +21,15 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from config import Config
 from database import Booking, get_db, init_db
-from models import BookingCancellation, BookingCreate, BookingResponse, HealthResponse
+from shared.events import BookingCancelledEvent, BookingCreatedEvent
 from shared.logging_config import configure_logging, get_logger
+from shared.messaging import broker
+from shared.models import (
+    BookingCancellation,
+    BookingCreate,
+    BookingResponse,
+    HealthResponse,
+)
 from shared.utils import log_request, retry_on_failure
 
 
@@ -33,15 +40,54 @@ BOOKING_NOT_FOUND = "Booking not found"
 REQUEST_TIMEOUT = 5
 
 
+def booking_to_response(booking: Booking) -> dict:
+    """
+    Convert booking database model to response dict.
+
+    :param booking: Booking database object
+    :type booking: Booking
+    :return: Booking data as dictionary with dates parsed
+    :rtype: dict
+    """
+    from datetime import date
+
+    return {
+        "id": booking.id,
+        "user_id": booking.user_id,
+        "hotel_id": booking.hotel_id,
+        "room_id": booking.room_id,
+        "check_in": (
+            date.fromisoformat(booking.check_in)
+            if isinstance(booking.check_in, str)
+            else booking.check_in
+        ),
+        "check_out": (
+            date.fromisoformat(booking.check_out)
+            if isinstance(booking.check_out, str)
+            else booking.check_out
+        ),
+        "total_price": booking.total_price,
+        "status": booking.status,
+        "created_at": booking.created_at,
+    }
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     logger.info("service_starting", port=Config.SERVICE_PORT)
     init_db()
+    await broker.connect()
     yield
+    await broker.close()
     logger.info("service_stopping")
 
 
-app = FastAPI(title="Booking Service", lifespan=lifespan)
+app = FastAPI(
+    title="Booking Service",
+    description="Hotel booking management service for creating, retrieving, and cancelling room bookings",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
 
 @retry_on_failure(max_retries=3, delay=0.5)
@@ -139,23 +185,43 @@ def calculate_total_price(room_data: dict, check_in: str, check_out: str) -> flo
     return room_data["price_per_night"] * nights
 
 
-@app.get("/health", response_model=HealthResponse)
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    summary="Health Check",
+    description="Check if the booking service is running and healthy",
+    tags=["Health"],
+)
 async def health_check():
     return HealthResponse(status="healthy", service=Config.SERVICE_NAME)
 
 
 @app.post(
-    "/bookings", response_model=BookingResponse, status_code=status.HTTP_201_CREATED
+    "/bookings",
+    response_model=BookingResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create Booking",
+    description="Create a new hotel room booking. Validates user existence, checks room availability, and calculates total price.",
+    tags=["Bookings"],
+    responses={
+        201: {"description": "Booking created successfully"},
+        400: {"description": "Room not available or invalid dates"},
+        404: {"description": "User or hotel not found"},
+        503: {"description": "Service temporarily unavailable"},
+    },
 )
 async def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
     try:
+        check_in_str = booking.check_in.isoformat()
+        check_out_str = booking.check_out.isoformat()
+
         if not verify_user_exists(booking.user_id):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
             )
 
         room_data = check_room_availability(
-            booking.hotel_id, booking.room_id, booking.check_in, booking.check_out
+            booking.hotel_id, booking.room_id, check_in_str, check_out_str
         )
 
         if not room_data:
@@ -164,16 +230,14 @@ async def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
                 detail="Room not available for the selected dates",
             )
 
-        total_price = calculate_total_price(
-            room_data, booking.check_in, booking.check_out
-        )
+        total_price = calculate_total_price(room_data, check_in_str, check_out_str)
 
         db_booking = Booking(
             user_id=booking.user_id,
             hotel_id=booking.hotel_id,
             room_id=booking.room_id,
-            check_in=booking.check_in,
-            check_out=booking.check_out,
+            check_in=check_in_str,
+            check_out=check_out_str,
             total_price=total_price,
             status="confirmed",
         )
@@ -196,6 +260,17 @@ async def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(db_booking)
 
+        event = BookingCreatedEvent(
+            booking_id=db_booking.id,
+            user_id=db_booking.user_id,
+            hotel_id=db_booking.hotel_id,
+            room_id=db_booking.room_id,
+            check_in=db_booking.check_in,
+            check_out=db_booking.check_out,
+            total_price=db_booking.total_price,
+        )
+        await broker.publish("booking.created", event.model_dump())
+
         logger.info(
             "booking_created",
             booking_id=db_booking.id,
@@ -204,7 +279,7 @@ async def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
             room_id=booking.room_id,
         )
 
-        return db_booking
+        return booking_to_response(db_booking)
 
     except HTTPException:
         raise
@@ -223,17 +298,37 @@ async def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
         ) from e
 
 
-@app.get("/bookings/{booking_id}", response_model=BookingResponse)
+@app.get(
+    "/bookings/{booking_id}",
+    response_model=BookingResponse,
+    summary="Get Booking",
+    description="Retrieve details of a specific booking by ID",
+    tags=["Bookings"],
+    responses={
+        200: {"description": "Booking details retrieved successfully"},
+        404: {"description": "Booking not found"},
+    },
+)
 async def get_booking(booking_id: int, db: Session = Depends(get_db)):
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=BOOKING_NOT_FOUND
         )
-    return booking
+    return booking_to_response(booking)
 
 
-@app.get("/bookings/user/{user_id}", response_model=List[BookingResponse])
+@app.get(
+    "/bookings/user/{user_id}",
+    response_model=List[BookingResponse],
+    summary="Get User Bookings",
+    description="Retrieve all bookings for a specific user",
+    tags=["Bookings"],
+    responses={
+        200: {"description": "List of user bookings retrieved successfully"},
+        404: {"description": "User not found"},
+    },
+)
 async def get_user_bookings(user_id: int, db: Session = Depends(get_db)):
     try:
         if not verify_user_exists(user_id):
@@ -242,7 +337,7 @@ async def get_user_bookings(user_id: int, db: Session = Depends(get_db)):
             )
 
         bookings = db.query(Booking).filter(Booking.user_id == user_id).all()
-        return bookings
+        return [booking_to_response(booking) for booking in bookings]
     except HTTPException:
         raise
     except Exception as e:
@@ -253,7 +348,19 @@ async def get_user_bookings(user_id: int, db: Session = Depends(get_db)):
         ) from e
 
 
-@app.put("/bookings/{booking_id}/cancel", response_model=BookingResponse)
+@app.put(
+    "/bookings/{booking_id}/cancel",
+    response_model=BookingResponse,
+    summary="Cancel Booking",
+    description="Cancel an existing booking and restore room availability",
+    tags=["Bookings"],
+    responses={
+        200: {"description": "Booking cancelled successfully"},
+        400: {"description": "Booking already cancelled"},
+        404: {"description": "Booking not found"},
+        503: {"description": "Service temporarily unavailable"},
+    },
+)
 async def cancel_booking(
     booking_id: int, cancellation: BookingCancellation, db: Session = Depends(get_db)
 ):
@@ -287,10 +394,18 @@ async def cancel_booking(
         db.commit()
         db.refresh(booking)
 
+        event = BookingCancelledEvent(
+            booking_id=booking_id,
+            hotel_id=booking.hotel_id,
+            room_id=booking.room_id,
+            reason=cancellation.reason,
+        )
+        await broker.publish("booking.cancelled", event.model_dump())
+
         logger.info(
             "booking_cancelled", booking_id=booking_id, reason=cancellation.reason
         )
-        return booking
+        return booking_to_response(booking)
 
     except HTTPException:
         raise

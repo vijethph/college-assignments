@@ -13,6 +13,7 @@ passlib = "*"
 sqlalchemy = "*"
 redis = "*"
 aiohttp = {extras = ["speedups"], version = "*"}
+aio-pika = "*"
 
 [dev-packages]
 pylint = "*"
